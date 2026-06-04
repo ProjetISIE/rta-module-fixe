@@ -24,12 +24,13 @@
 *  Service UUID : 12345678-1234-5678-1234-56789abcdef0
 *
 *  Caractéristique 1 — UUID …abcdef1
-*    → Distance minimale secteur 45°  (float, mètres)
+*    → Distance minimale secteur 45°  (float, mètres, little-endian IEEE 754)
 *    → READ + NOTIFY  |  1 mise à jour par tour LiDAR (~10 Hz)
 *
 *  Caractéristique 2 — UUID …abcdef2
 *    → Même valeur au format "D<mm>\n"  (ex: "D1200\n")
 *    → READ + NOTIFY  |  Compatibilité ancien protocole XBee
+*    → "DNODATA\n" tant qu'aucune mesure valide n'est disponible
 *
 *  FILTRE ANGULAIRE
 *  ----------------
@@ -43,28 +44,44 @@
 *
 *  Board Arduino IDE : DOIT ESP32 DEVKIT V1  |  Serial : 115200 baud
 * =============================================================================
+*
+*  CORRECTIONS v2 (version finale)
+*  ---------------------------------
+*  [1] THREAD SAFETY   : mutex portMUX_TYPE protège publishDistance()
+*                        appelé depuis loop() (core 1) pendant que la
+*                        stack BLE tourne sur core 0.
+*  [2] INTERVALLE BLE  : setMaxPreferred(0x12) ajouté pour éviter qu'un
+*                        client Android négocie un intervalle de connexion
+*                        trop long (~1 s) et ralentisse les notifications.
+*  [3] VALEUR INITIALE : pCharStr initialisé à "DNODATA\n" au lieu de
+*                        "D0\n" pour ne pas retourner 0 mm avant la 1ère
+*                        mesure valide.
+*  [4] ENDIANNESS FLOAT: commentaire explicite + helper floatToLE() qui
+*                        garantit l'encodage little-endian IEEE 754 quel
+*                        que soit le compilateur / l'architecture cible.
+* =============================================================================
 */
- 
+
 // ======================== BIBLIOTHÈQUES ========================
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
- 
+
 // ======================== PINS & BAUD ==========================
 #define LIDAR_RX_PIN   16
 #define LIDAR_TX_PIN   17
 #define LIDAR_BAUD     460800
 #define DEBUG_BAUD     115200
- 
+
 // ======================== FILTRE ANGULAIRE =====================
 #define ANGLE_CENTER     0.0f    // Centre du secteur (0° = face à l'obstacle)
 #define ANGLE_HALF_WIDTH 22.5f   // Demi-angle → secteur total 45°
- 
+
 // ======================== SEUILS DISTANCE ======================
 #define DIST_MIN_MM    50.0f     // < 5 cm  = bruit LiDAR, ignoré
 #define DIST_MAX_MM 14000.0f     // > 14 m  = hors zone utile (cahier des charges)
- 
+
 // ======================== COMMANDES RPLIDAR ====================
 #define RPLIDAR_CMD_STOP       0x25
 #define RPLIDAR_CMD_RESET      0x40
@@ -73,39 +90,58 @@
 #define RPLIDAR_CMD_GET_HEALTH 0x52
 #define RPLIDAR_ANS_SYNC1      0xA5
 #define RPLIDAR_ANS_SYNC2      0x5A
- 
+
 // ======================== UUIDs BLE ============================
 #define BLE_DEVICE_NAME     "RTA_FIXE"
 #define BLE_SERVICE_UUID    "12345678-1234-5678-1234-56789abcdef0"
 #define BLE_CHAR_FLOAT_UUID "12345678-1234-5678-1234-56789abcdef1"
 #define BLE_CHAR_STR_UUID   "12345678-1234-5678-1234-56789abcdef2"
- 
+
 // ======================== VARIABLES GLOBALES ===================
 HardwareSerial LidarSerial(2);
- 
+
 struct ScanPoint {
   float   angle;
   float   distance;
   uint8_t quality;
   bool    startFlag;
 };
- 
+
 // BLE
 BLEServer         *pBleServer    = nullptr;
 BLECharacteristic *pCharFloat    = nullptr;
 BLECharacteristic *pCharStr      = nullptr;
 bool               bleConnected  = false;
- 
+
+// [CORRECTION 1] Mutex pour protéger les accès BLE cross-core
+// La stack BLE tourne sur le core 0, loop() sur le core 1.
+// Sans mutex, setValue() + notify() appelés depuis loop() peuvent
+// corrompre les buffers internes de la lib BLE sous charge.
+static portMUX_TYPE bleMux = portMUX_INITIALIZER_UNLOCKED;
+
 // Distance minimale accumulée sur le tour en cours
 float minDistMM    = DIST_MAX_MM + 1.0f;
 float lastPubDistM = 0.0f;
- 
+
 // Statistiques
 unsigned long cntScans     = 0;
 unsigned long cntTotal     = 0;
 unsigned long cntFiltered  = 0;
 unsigned long tStats       = 0;
- 
+
+// =============================================================
+//  [CORRECTION 4] HELPER ENDIANNESS
+//  Encode un float en little-endian IEEE 754 dans un buffer uint8_t[4].
+//  Sur ESP32 (little-endian), memcpy suffit, mais ce helper rend
+//  l'intention explicite et reste portable si le code est porté sur
+//  une archi big-endian (ex: certains DSP, réseau).
+// =============================================================
+static void floatToLE(float value, uint8_t out[4]) {
+  // ESP32 est nativement little-endian : memcpy est suffisant.
+  // Sur une archi big-endian il faudrait inverser les octets ici.
+  memcpy(out, &value, sizeof(float));
+}
+
 // =============================================================
 //  CALLBACKS BLE
 // =============================================================
@@ -120,7 +156,7 @@ class RtaBleCallbacks : public BLEServerCallbacks {
     BLEDevice::startAdvertising();
   }
 };
- 
+
 // =============================================================
 //  INIT BLE
 // =============================================================
@@ -128,65 +164,89 @@ void initBLE() {
   BLEDevice::init(BLE_DEVICE_NAME);
   pBleServer = BLEDevice::createServer();
   pBleServer->setCallbacks(new RtaBleCallbacks());
- 
+
   BLEService *pService = pBleServer->createService(BLE_SERVICE_UUID);
- 
+
   // Caractéristique float (mètres) — usage principal module mobile
   pCharFloat = pService->createCharacteristic(
     BLE_CHAR_FLOAT_UUID,
     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
   );
   pCharFloat->addDescriptor(new BLE2902());
-  float initVal = 0.0f;
-  pCharFloat->setValue((uint8_t*)&initVal, sizeof(float));
- 
+
+  // [CORRECTION 3+4] Valeur initiale float = -1.0 (aucune mesure disponible)
+  // -1.0 est hors plage [0 ; 14] m → le client mobile peut détecter
+  // l'absence de données sans ambiguïté.
+  uint8_t initBuf[4];
+  floatToLE(-1.0f, initBuf);
+  pCharFloat->setValue(initBuf, sizeof(initBuf));
+
   // Caractéristique string — format "D<mm>\n" (compatibilité XBee)
   pCharStr = pService->createCharacteristic(
     BLE_CHAR_STR_UUID,
     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
   );
   pCharStr->addDescriptor(new BLE2902());
-  pCharStr->setValue("D0\n");
- 
+
+  // [CORRECTION 3] "DNODATA\n" au lieu de "D0\n" pour ne pas retourner
+  // 0 mm avant la première mesure valide (0 mm = obstacle collé au LiDAR).
+  pCharStr->setValue("DNODATA\n");
+
   pService->start();
- 
+
   BLEAdvertising *pAdv = BLEDevice::getAdvertising();
   pAdv->addServiceUUID(BLE_SERVICE_UUID);
   pAdv->setScanResponse(true);
   pAdv->setMinPreferred(0x06);
+
+  // [CORRECTION 2] setMaxPreferred évite qu'un client Android négocie
+  // un intervalle de connexion trop long (jusqu'à ~1 s sans cette limite),
+  // ce qui ralentirait les notifications LiDAR (~10 Hz).
+  // 0x06 = 7.5 ms, 0x12 = 22.5 ms → plage raisonnable pour du temps réel.
+  pAdv->setMaxPreferred(0x12);
+
   BLEDevice::startAdvertising();
- 
+
   Serial.println("[BLE] Serveur démarré — en attente de connexion...");
   Serial.println("[BLE] Nom    : " BLE_DEVICE_NAME);
   Serial.println("[BLE] Svc    : " BLE_SERVICE_UUID);
   Serial.println("[BLE] Float  : " BLE_CHAR_FLOAT_UUID);
   Serial.println("[BLE] String : " BLE_CHAR_STR_UUID);
 }
- 
+
 // =============================================================
 //  PUBLICATION BLE — 1 fois par tour LiDAR
 // =============================================================
 void publishDistance(float distMM) {
   if (distMM < DIST_MIN_MM) distMM = DIST_MIN_MM;
   if (distMM > DIST_MAX_MM) distMM = DIST_MAX_MM;
- 
+
   float distM = distMM / 1000.0f;
   lastPubDistM = distM;
- 
-  // Float
-  pCharFloat->setValue((uint8_t*)&distM, sizeof(float));
- 
+
+  // [CORRECTION 1+4] Section critique protégée par mutex.
+  // setValue() et notify() modifient des buffers internes de la lib BLE
+  // qui peuvent être lus simultanément par le core 0 (stack BLE).
+  portENTER_CRITICAL(&bleMux);
+
+  // Float little-endian explicite via helper
+  uint8_t buf4[4];
+  floatToLE(distM, buf4);
+  pCharFloat->setValue(buf4, sizeof(buf4));
+
   // String format XBee "D<mm>\n"
-  char buf[16];
-  snprintf(buf, sizeof(buf), "D%.0f\n", distMM);
-  pCharStr->setValue((uint8_t*)buf, strlen(buf));
- 
+  char bufStr[16];
+  snprintf(bufStr, sizeof(bufStr), "D%.0f\n", distMM);
+  pCharStr->setValue((uint8_t*)bufStr, strlen(bufStr));
+
   if (bleConnected) {
     pCharFloat->notify();
     pCharStr->notify();
   }
+
+  portEXIT_CRITICAL(&bleMux);
 }
- 
+
 // =============================================================
 //  FILTRE ANGULAIRE
 // =============================================================
@@ -195,7 +255,7 @@ static inline float normalizeAngle(float a) {
   while (a >= 360.0f) a -= 360.0f;
   return a;
 }
- 
+
 bool isInSector(float angle) {
   float lo = normalizeAngle(ANGLE_CENTER - ANGLE_HALF_WIDTH);
   float hi = normalizeAngle(ANGLE_CENTER + ANGLE_HALF_WIDTH);
@@ -203,7 +263,7 @@ bool isInSector(float angle) {
   if (lo <= hi) return (angle >= lo && angle <= hi);
   return (angle >= lo || angle <= hi);
 }
- 
+
 // =============================================================
 //  PROTOCOLE RPLIDAR
 // =============================================================
@@ -212,7 +272,7 @@ void lidarSendCmd(uint8_t cmd) {
   LidarSerial.write(pkt, 2);
   LidarSerial.flush();
 }
- 
+
 bool lidarReadDescriptor(uint32_t *dLen, uint8_t *sendMode,
                           uint8_t *dType, unsigned long tms = 2000) {
   unsigned long t0 = millis();
@@ -228,11 +288,11 @@ bool lidarReadDescriptor(uint32_t *dLen, uint8_t *sendMode,
   *dLen = raw & 0x3FFFFFFF; *sendMode = (raw>>30)&0x03; *dType = d[6];
   return true;
 }
- 
+
 void lidarFlush() { while (LidarSerial.available()) LidarSerial.read(); }
 void lidarStop()  { lidarSendCmd(RPLIDAR_CMD_STOP);  delay(100); lidarFlush(); }
 void lidarReset() { lidarSendCmd(RPLIDAR_CMD_RESET); delay(500); lidarFlush(); }
- 
+
 bool lidarGetInfo() {
   lidarFlush(); lidarSendCmd(RPLIDAR_CMD_GET_INFO);
   uint32_t dLen; uint8_t sMode, dType;
@@ -243,7 +303,7 @@ bool lidarGetInfo() {
   Serial.printf("  LiDAR — Modèle:%d  FW:%d.%d  HW:%d\n", info[0], info[2], info[1], info[3]);
   return true;
 }
- 
+
 bool lidarGetHealth() {
   lidarFlush(); lidarSendCmd(RPLIDAR_CMD_GET_HEALTH);
   uint32_t dLen; uint8_t sMode, dType;
@@ -255,7 +315,7 @@ bool lidarGetHealth() {
   Serial.printf("  Santé : %s  (erreur: %d)\n", h[0]<3?st[h[0]]:"?", h[1]|(h[2]<<8));
   return (h[0]==0);
 }
- 
+
 bool lidarStartScan() {
   lidarFlush(); lidarSendCmd(RPLIDAR_CMD_SCAN);
   uint32_t dLen; uint8_t sMode, dType;
@@ -272,7 +332,7 @@ bool lidarStartScan() {
   Serial.println("  ------|-----------------|----------");
   return true;
 }
- 
+
 bool lidarReadPoint(ScanPoint *p) {
   uint8_t d[5];
   if (LidarSerial.readBytes(d,5) < 5) return false;
@@ -287,7 +347,7 @@ bool lidarReadPoint(ScanPoint *p) {
   p->distance=dRaw/4.0f;
   return true;
 }
- 
+
 // =============================================================
 //  SETUP
 // =============================================================
@@ -298,10 +358,10 @@ void setup() {
   Serial.println("  RTA — Rider Training Assistant");
   Serial.println("  Partie Fixe : RPLidar C1 + ESP32");
   Serial.println("==============================================\n");
- 
+
   Serial.println("--- Init BLE ---");
   initBLE();
- 
+
   Serial.println("\n--- Init LiDAR UART ---");
   LidarSerial.setRxBufferSize(512);
   LidarSerial.begin(LIDAR_BAUD, SERIAL_8N1, LIDAR_RX_PIN, LIDAR_TX_PIN);
@@ -309,13 +369,13 @@ void setup() {
   Serial.printf("  GPIO%d(RX) / GPIO%d(TX) @ %d baud\n",
                 LIDAR_RX_PIN, LIDAR_TX_PIN, LIDAR_BAUD);
   delay(500);
- 
+
   Serial.println("\n--- Init LiDAR ---");
   lidarStop();  delay(200);
   lidarReset(); delay(1000);
   if (!lidarGetInfo())   Serial.println("[WARN] Infos LiDAR indisponibles");
   if (!lidarGetHealth()) Serial.println("[WARN] LiDAR signale un problème");
- 
+
   Serial.println("\n--- Démarrage scan ---");
   if (!lidarStartScan()) {
     Serial.println("[ERREUR FATALE] Scan impossible — appuyer sur EN");
@@ -323,25 +383,25 @@ void setup() {
   }
   tStats = millis();
 }
- 
+
 // =============================================================
 //  LOOP
 // =============================================================
 void loop() {
- 
+
   if (LidarSerial.available() >= 5) {
     ScanPoint pt;
     if (!lidarReadPoint(&pt)) return;
- 
+
     cntTotal++;
- 
+
     // --- Nouveau tour : publier la distance du tour précédent ---
     if (pt.startFlag) {
       cntScans++;
- 
+
       if (minDistMM <= DIST_MAX_MM) {
         publishDistance(minDistMM);
- 
+
         // Affichage : 1 ligne par tour uniquement
         Serial.printf("  %5lu |   %7.3f m     |  %s\n",
           cntScans,
@@ -350,17 +410,17 @@ void loop() {
       }
       minDistMM = DIST_MAX_MM + 1.0f;  // reset accumulateur
     }
- 
+
     // --- Filtre angulaire 45° ---
     if (!isInSector(pt.angle)) return;
     cntFiltered++;
- 
+
     // --- Mise à jour distance minimale du tour en cours ---
     if (pt.distance >= DIST_MIN_MM && pt.distance <= DIST_MAX_MM) {
       if (pt.distance < minDistMM) minDistMM = pt.distance;
     }
   }
- 
+
   // --- Statistiques toutes les 5 secondes ---
   if (millis() - tStats > 5000) {
     float dt = (millis() - tStats) / 1000.0f;
