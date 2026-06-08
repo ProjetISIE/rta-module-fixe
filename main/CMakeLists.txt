@@ -2,6 +2,8 @@ idf_component_register(
   SRCS
   "main.cpp"
   "ble_server.c"
+  "lidar.c"
+  "rta_gatt.c"
   INCLUDE_DIRS
   "../include"
   REQUIRES
