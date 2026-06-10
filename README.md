@@ -9,8 +9,13 @@ et d’émettre cette information via BLE.
 
 ## Architecture Logicielle
 
-Le module est construit sur l'ESP-IDF et utilise plusieurs composants clés
-fonctionnant de manière asynchrone :
+Le module est écrit en **C++23 moderne** et construit sur l'ESP-IDF. Il applique les meilleures pratiques de programmation système :
+*   **RAII** : Gestion automatique des ressources (UART, BLE) via des classes.
+*   **Strong Typing** : Utilisation de types dédiés (`Millimeters`, `Degrees`) pour éviter les erreurs d'unités.
+*   **std::expected** : Gestion d'erreurs explicite sans codes de retour magiques.
+*   **Namespaces** : Organisation modulaire du code (`rta::ble`, `rta::lidar`).
+
+Le système utilise plusieurs composants clés fonctionnant de manière asynchrone :
 
 1. **LiDAR Task (FreeRTOS)** :
    - Gère la communication UART avec le capteur LiDAR (RPLiDAR).

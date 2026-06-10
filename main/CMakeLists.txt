@@ -1,11 +1,12 @@
 idf_component_register(
   SRCS
   "main.cpp"
-  "ble_server.c"
-  "lidar.c"
-  "rta_gatt.c"
+  "ble_server.cpp"
+  "lidar.cpp"
+  "rta_gatt.cpp"
   INCLUDE_DIRS
   "../include"
+  "."
   REQUIRES
   bt
   nvs_flash
