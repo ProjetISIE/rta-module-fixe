@@ -52,7 +52,7 @@ void lidar_task(void *arg) {
 
     if (!lidar_start_scan()) {
       ESP_LOGE(TAG, "Failed to start LiDAR scan, retrying in 5s...");
-      rta_gatt_update_distance(-1.0f);
+      rta_gatt_update_distance(0xFFFF);
       vTaskDelay(pdMS_TO_TICKS(5000));
       continue;
     }
@@ -77,7 +77,7 @@ void lidar_task(void *arg) {
         if (pt.start_flag) {
           cnt_scans++;
           if (min_dist_mm <= DIST_MAX_MM) {
-            rta_gatt_update_distance(min_dist_mm / 1000.0f);
+            rta_gatt_update_distance((uint16_t)min_dist_mm);
           }
           min_dist_mm = DIST_MAX_MM + 1.0f;
         }
@@ -98,7 +98,7 @@ void lidar_task(void *arg) {
         if (consecutive_errors % 10 == 0) { // Throttle log
           ESP_LOGW(TAG, "LiDAR data timeout (1s), marking as invalid");
         }
-        rta_gatt_update_distance(-1.0f);
+        rta_gatt_update_distance(0xFFFF);
         // Reset timer to avoid spamming the log if still in failure
         last_valid_point_time = xTaskGetTickCount() - pdMS_TO_TICKS(500);
       }
