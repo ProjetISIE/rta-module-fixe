@@ -7,17 +7,16 @@
 #include "units.hpp"
 #include <cmath>
 
-using namespace rta;
-
 static const char *TAG = "RTA_FIXE_MAIN";
 
 // Angular Filter Configuration
-static constexpr Degrees ANGLE_CENTER{0.0f};
-static constexpr Degrees ANGLE_HALF_WIDTH{22.5f};
-static constexpr Millimeters DIST_MIN{50};
-static constexpr Millimeters DIST_MAX{14000};
+static constexpr rta::Degrees ANGLE_CENTER{0.0f};
+static constexpr rta::Degrees ANGLE_HALF_WIDTH{22.5f};
+static constexpr rta::Millimeters DIST_MIN{50};
+static constexpr rta::Millimeters DIST_MAX{14000};
 
-[[nodiscard]] static constexpr auto normalize_angle(Degrees a) -> Degrees {
+[[nodiscard]] static constexpr auto normalize_angle(rta::Degrees a)
+    -> rta::Degrees {
   while (a.value < 0.0f)
     a.value += 360.0f;
   while (a.value >= 360.0f)
@@ -25,12 +24,12 @@ static constexpr Millimeters DIST_MAX{14000};
   return a;
 }
 
-[[nodiscard]] static constexpr auto is_in_sector(Degrees angle) -> bool {
+[[nodiscard]] static constexpr auto is_in_sector(rta::Degrees angle) -> bool {
   const float lo =
-      normalize_angle(Degrees{ANGLE_CENTER.value - ANGLE_HALF_WIDTH.value})
+      normalize_angle(rta::Degrees{ANGLE_CENTER.value - ANGLE_HALF_WIDTH.value})
           .value;
   const float hi =
-      normalize_angle(Degrees{ANGLE_CENTER.value + ANGLE_HALF_WIDTH.value})
+      normalize_angle(rta::Degrees{ANGLE_CENTER.value + ANGLE_HALF_WIDTH.value})
           .value;
   const float a = normalize_angle(angle).value;
   if (lo <= hi)
@@ -64,7 +63,7 @@ void lidar_task(void *) {
     last_valid_point_time = xTaskGetTickCount();
     consecutive_errors = 0;
 
-    Millimeters min_dist{static_cast<std::uint16_t>(DIST_MAX.value + 1)};
+    rta::Millimeters min_dist{static_cast<std::uint16_t>(DIST_MAX.value + 1)};
     std::uint32_t cnt_scans = 0;
     std::uint32_t cnt_total = 0;
     TickType_t t_stats = xTaskGetTickCount();
@@ -83,7 +82,7 @@ void lidar_task(void *) {
             ble::update_distance(min_dist);
           }
           min_dist =
-              Millimeters{static_cast<std::uint16_t>(DIST_MAX.value + 1)};
+              rta::Millimeters{static_cast<std::uint16_t>(DIST_MAX.value + 1)};
         }
 
         if (is_in_sector(pt.angle)) {

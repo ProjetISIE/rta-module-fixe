@@ -2,6 +2,7 @@
 #include "esp_log.h"
 #include "host/ble_hs.h"
 #include "services/gatt/ble_svc_gatt.h"
+#include <atomic>
 #include <cstring>
 
 namespace rta::ble {
@@ -20,14 +21,17 @@ static constexpr ble_uuid128_t CHAR_DIST_UUID = {
               0x56, 0x34, 0x12, 0x78, 0x56}};
 
 static std::uint16_t char_dist_handle;
-static Millimeters current_dist{0xFFFF}; // Sentinel value for NO DATA
+static std::atomic<std::uint16_t> current_dist_mm{
+    0xFFFF}; // Sentinel value for NO DATA
 
-extern "C" int gatt_char_access(std::uint16_t conn_handle,
+extern "C" int gatt_char_access([[maybe_unused]] std::uint16_t conn_handle,
                                 std::uint16_t attr_handle,
-                                struct ble_gatt_access_ctxt *ctxt, void *arg) {
+                                struct ble_gatt_access_ctxt *ctxt,
+                                [[maybe_unused]] void *arg) {
   if (attr_handle == char_dist_handle) {
-    return os_mbuf_append(ctxt->om, &current_dist.value,
-                          sizeof(current_dist.value));
+    const auto current_dist =
+        current_dist_mm.load(std::memory_order_relaxed);
+    return os_mbuf_append(ctxt->om, &current_dist, sizeof(current_dist));
   }
   return BLE_ATT_ERR_UNLIKELY;
 }
@@ -56,7 +60,7 @@ const struct ble_gatt_svc_def gatt_svcs[] = {
 };
 
 auto update_distance(Millimeters dist) -> void {
-  current_dist = dist;
+  current_dist_mm.store(dist.value, std::memory_order_relaxed);
   ble_gatts_chr_updated(char_dist_handle);
 }
 
