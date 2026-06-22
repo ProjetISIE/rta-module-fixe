@@ -1,4 +1,5 @@
 #include "BleServer.hpp"
+#include "EspNowFixe.hpp"
 #include "Lidar.hpp"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -56,6 +57,7 @@ void lidar_task(void *) {
     if (auto res = sensor.start_scan(); !res) {
       ESP_LOGE(TAG, "Failed to start LiDAR scan, retrying in 5s...");
       ble::invalidate_distance();
+      rta::espnow::send_distance(0xFFFF);
       vTaskDelay(pdMS_TO_TICKS(5000));
       continue;
     }
@@ -81,6 +83,7 @@ void lidar_task(void *) {
           cnt_scans++;
           if (min_dist <= DIST_MAX) {
             ble::update_distance(min_dist);
+            rta::espnow::send_distance(min_dist.value);
           }
           min_dist =
               Millimeters{static_cast<std::uint16_t>(DIST_MAX.value + 1)};
@@ -103,6 +106,7 @@ void lidar_task(void *) {
           ESP_LOGW(TAG, "LiDAR data timeout (1s), marking as invalid");
         }
         ble::invalidate_distance();
+        rta::espnow::send_distance(0xFFFF);
         last_valid_point_time = xTaskGetTickCount() - pdMS_TO_TICKS(500);
       }
 
@@ -133,6 +137,8 @@ extern "C" void app_main() {
   }
 
   ble_server.start();
+
+  rta::espnow::init();
 
   xTaskCreate(lidar_task, "lidar_task", 4096, nullptr, 5, nullptr);
 }

@@ -4,6 +4,7 @@ idf_component_register(
   "BleServer.cpp"
   "Lidar.cpp"
   "rta_gatt.cpp"
+  "EspNowFixe.cpp"
   INCLUDE_DIRS
   "../include"
   "."
@@ -12,4 +13,7 @@ idf_component_register(
   nvs_flash
   esp_driver_uart
   log
-  freertos)
+  freertos
+  esp_wifi
+  esp_netif
+  esp_event)
