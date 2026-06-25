@@ -1,4 +1,5 @@
-#pragma once
+#ifndef RTA_GATT_HPP_
+#define RTA_GATT_HPP_
 
 #include "host/ble_gatt.h"
 #include "units.hpp"
@@ -20,3 +21,5 @@ auto update_distance(Millimeters dist) -> void;
 auto invalidate_distance() -> void;
 
 } // namespace rta::ble
+
+#endif // RTA_GATT_HPP_

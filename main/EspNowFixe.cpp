@@ -8,31 +8,19 @@
 #include "nvs_flash.h"
 #include <cstring>
 
-namespace rta {
-namespace espnow {
+namespace rta::espnow {
 
 static const char *TAG = "ESP_NOW_FIXE";
 
-#pragma pack(push, 1)
-struct EspNowDistancePacket {
+struct __attribute__((packed)) EspNowDistancePacket {
   uint8_t magic[4];
   uint16_t distance_mm;
 };
-#pragma pack(pop)
 
 void init() {
   ESP_LOGI(TAG, "Initializing ESP-NOW (Fixe)...");
 
-  // Initialize NVS (if not already done)
-  esp_err_t err = nvs_flash_init();
-  if (err == ESP_ERR_NVS_NO_FREE_PAGES ||
-      err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-    ESP_ERROR_CHECK(nvs_flash_erase());
-    err = nvs_flash_init();
-  }
-  ESP_ERROR_CHECK(err);
-
-  err = esp_netif_init();
+  esp_err_t err = esp_netif_init();
   if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
     ESP_ERROR_CHECK(err);
   }
@@ -69,20 +57,17 @@ void init() {
 }
 
 void send_distance(uint16_t distance_mm) {
-  EspNowDistancePacket pkt;
-  pkt.magic[0] = 'R';
-  pkt.magic[1] = 'T';
-  pkt.magic[2] = 'A';
-  pkt.magic[3] = '!';
-  pkt.distance_mm = distance_mm;
+  EspNowDistancePacket pkt = {
+      .magic = {'R', 'T', 'A', '!'},
+      .distance_mm = distance_mm,
+  };
 
-  uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  constexpr uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
   esp_err_t err = esp_now_send(
-      broadcast_mac, reinterpret_cast<const uint8_t *>(&pkt), sizeof(pkt));
+      kBroadcastMac, reinterpret_cast<const uint8_t *>(&pkt), sizeof(pkt));
   if (err != ESP_OK) {
     ESP_LOGW(TAG, "Failed to send ESP-NOW packet: %s", esp_err_to_name(err));
   }
 }
 
-} // namespace espnow
-} // namespace rta
+} // namespace rta::espnow

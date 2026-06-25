@@ -1,11 +1,12 @@
-#pragma once
+#ifndef RTA_ESPNOW_FIXE_HPP_
+#define RTA_ESPNOW_FIXE_HPP_
 #include <cstdint>
 
-namespace rta {
-namespace espnow {
+namespace rta::espnow {
 
 void init();
 void send_distance(uint16_t distance_mm);
 
-} // namespace espnow
-} // namespace rta
+} // namespace rta::espnow
+
+#endif // RTA_ESPNOW_FIXE_HPP_

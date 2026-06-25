@@ -1,16 +1,22 @@
-#ifndef RTA_BLE_SERVER_HPP
-#define RTA_BLE_SERVER_HPP
+#ifndef RTA_BLE_SERVER_HPP_
+#define RTA_BLE_SERVER_HPP_
 
 #include "host/ble_hs.h"
-#include <cstdint>
+#include <string>
 #include <string_view>
 
 namespace rta::ble {
 
+extern "C" {
+int gap_event_handler(struct ble_gap_event *event, void *arg);
+void on_sync_handler(void);
+void host_task_handler(void *param);
+}
+
 class BleServer {
 public:
   explicit BleServer(std::string_view device_name);
-  ~BleServer() = default;
+  ~BleServer();
 
   // Deleted copy to enforce unique management
   BleServer(const BleServer &) = delete;
@@ -19,14 +25,19 @@ public:
   auto register_services(const struct ble_gatt_svc_def *svcs) -> int;
   auto start() -> int;
 
-  // Internal use only (callbacks)
+private:
   static auto advertise() -> void;
   static auto ble_host_task(void *param) -> void;
 
-private:
-  inline static char ble_device_name[32] = "RTA_FIXE";
+  std::string device_name_;
+  static BleServer *instance_;
+
+  friend int ::rta::ble::gap_event_handler(struct ble_gap_event *event,
+                                           void *arg);
+  friend void ::rta::ble::on_sync_handler(void);
+  friend void ::rta::ble::host_task_handler(void *param);
 };
 
 } // namespace rta::ble
 
-#endif // RTA_BLE_SERVER_HPP
+#endif // RTA_BLE_SERVER_HPP_

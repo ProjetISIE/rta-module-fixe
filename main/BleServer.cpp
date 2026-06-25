@@ -14,6 +14,8 @@ namespace rta::ble {
 
 static const char *TAG = "RTA_BLE";
 
+BleServer *BleServer::instance_ = nullptr;
+
 // --- C Callbacks Wrappers ---
 extern "C" {
 int gap_event_handler(struct ble_gap_event *event, void *arg) {
@@ -40,19 +42,9 @@ void host_task_handler(void *param) { BleServer::ble_host_task(param); }
 }
 // ----------------------------
 
-BleServer::BleServer(std::string_view device_name) {
-  esp_err_t ret = nvs_flash_init();
-  if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
-      ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-    ESP_ERROR_CHECK(nvs_flash_erase());
-    ret = nvs_flash_init();
-  }
-  ESP_ERROR_CHECK(ret);
-
-  std::size_t name_len =
-      std::min(device_name.length(), sizeof(ble_device_name) - 1);
-  std::memcpy(ble_device_name, device_name.data(), name_len);
-  ble_device_name[name_len] = '\0';
+BleServer::BleServer(std::string_view device_name) : device_name_(device_name) {
+  assert(instance_ == nullptr);
+  instance_ = this;
 
   nimble_port_init();
 
@@ -61,8 +53,11 @@ BleServer::BleServer(std::string_view device_name) {
   ble_svc_gap_init();
   ble_svc_gatt_init();
 
-  [[maybe_unused]] int rc = ble_svc_gap_device_name_set(ble_device_name);
+  int rc = ble_svc_gap_device_name_set(device_name_.c_str());
+  assert(rc == 0);
 }
+
+BleServer::~BleServer() { instance_ = nullptr; }
 
 auto BleServer::register_services(const struct ble_gatt_svc_def *svcs) -> int {
   int rc = ble_gatts_count_cfg(svcs);
@@ -82,8 +77,9 @@ auto BleServer::advertise() -> void {
 
   std::memset(&fields, 0, sizeof(fields));
   fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-  fields.name = reinterpret_cast<uint8_t *>(ble_device_name);
-  fields.name_len = std::strlen(ble_device_name);
+  fields.name = reinterpret_cast<uint8_t *>(
+      const_cast<char *>(instance_->device_name_.c_str()));
+  fields.name_len = instance_->device_name_.length();
   fields.name_is_complete = 1;
 
   int rc = ble_gap_adv_set_fields(&fields);

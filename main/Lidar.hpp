@@ -1,5 +1,5 @@
-#ifndef RTA_LIDAR_HPP
-#define RTA_LIDAR_HPP
+#ifndef RTA_LIDAR_HPP_
+#define RTA_LIDAR_HPP_
 
 #include "driver/uart.h"
 #include "units.hpp"
@@ -25,11 +25,11 @@ struct Point {
 
 class Lidar {
 public:
-  static constexpr std::size_t RxBufferSize = 1024;
-  static constexpr uart_port_t UartPort = UART_NUM_2;
-  static constexpr int TxPin = 26;
-  static constexpr int RxPin = 25;
-  static constexpr int BaudRate = 460800;
+  static constexpr std::size_t kRxBufferSize = 1024;
+  static constexpr uart_port_t kUartPort = UART_NUM_2;
+  static constexpr int kTxPin = 26;
+  static constexpr int kRxPin = 25;
+  static constexpr int kBaudRate = 460800;
 
   explicit Lidar();
   ~Lidar();
@@ -49,4 +49,4 @@ private:
 
 } // namespace rta::lidar
 
-#endif // RTA_LIDAR_HPP
+#endif // RTA_LIDAR_HPP_

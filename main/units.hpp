@@ -1,4 +1,5 @@
-#pragma once
+#ifndef RTA_UNITS_HPP_
+#define RTA_UNITS_HPP_
 
 #include <compare>
 #include <cstdint>
@@ -35,3 +36,5 @@ struct Meters {
 };
 
 } // namespace rta
+
+#endif // RTA_UNITS_HPP_
