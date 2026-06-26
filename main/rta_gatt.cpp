@@ -7,7 +7,7 @@
 
 namespace rta::ble {
 
-[[maybe_unused]] static const char *TAG = "RTA_GATT";
+[[maybe_unused]] static const char* TAG = "RTA_GATT";
 
 // UUIDs
 static constexpr ble_uuid128_t SERVICE_UUID = {
@@ -26,12 +26,12 @@ static std::atomic<std::uint16_t> current_dist{
 
 extern "C" int gatt_char_access(std::uint16_t conn_handle,
                                 std::uint16_t attr_handle,
-                                struct ble_gatt_access_ctxt *ctxt, void *arg) {
-  if (attr_handle == char_dist_handle) {
-    std::uint16_t dist_val = current_dist.load(std::memory_order_relaxed);
-    return os_mbuf_append(ctxt->om, &dist_val, sizeof(dist_val));
-  }
-  return BLE_ATT_ERR_UNLIKELY;
+                                struct ble_gatt_access_ctxt* ctxt, void* arg) {
+    if (attr_handle == char_dist_handle) {
+        std::uint16_t dist_val = current_dist.load(std::memory_order_relaxed);
+        return os_mbuf_append(ctxt->om, &dist_val, sizeof(dist_val));
+    }
+    return BLE_ATT_ERR_UNLIKELY;
 }
 
 static const struct ble_gatt_chr_def gatt_chrs[] = {
@@ -59,8 +59,8 @@ const struct ble_gatt_svc_def gatt_svcs[] = {
 };
 
 auto update_distance(Millimeters dist) -> void {
-  current_dist.store(dist.value, std::memory_order_relaxed);
-  ble_gatts_chr_updated(char_dist_handle);
+    current_dist.store(dist.value, std::memory_order_relaxed);
+    ble_gatts_chr_updated(char_dist_handle);
 }
 
 auto invalidate_distance() -> void { update_distance(Millimeters{0xFFFF}); }
