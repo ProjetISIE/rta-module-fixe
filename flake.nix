@@ -13,7 +13,7 @@
         f:
         nixpkgs.lib.genAttrs
           [
-            "x86_64-linux" # "aarch64-linux"
+            "x86_64-linux"
             "aarch64-darwin"
           ]
           (
@@ -30,7 +30,6 @@
           );
     in
     {
-      # devShells = esp-dev.devShells;
       devShells = systems (
         { pkgs }:
         {
@@ -59,9 +58,7 @@
                   lldb # Debug adapter
                   mkspiffs-presets.esp-idf
                   ninja # Build
-                  # pkg-config # Find libraries
-                  tio # Serial
-                  valgrind # Debugging and profiling
+                  (pkgs.writeShellScriptBin "lint" "clang-tidy -p build main/*.cpp")
                   (pkgs.writeShellScriptBin "setup" "cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -GNinja -B build")
                 ];
               };
